@@ -1,7 +1,7 @@
-XMPP HTTP Upload Service
-########################
+XMPP HTTP Upload Service (with S3 backend)
+##########################################
 
-This provides a Flask-based HTTP service which can be used with
+This provides a Flask-based HTTP service (with S3 backend) which can be used with
 `mod_http_upload_external <https://modules.prosody.im/mod_http_upload_external.html>`_.
 
 Configuration
