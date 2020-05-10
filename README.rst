@@ -18,8 +18,8 @@ The configuration file must contain the following keys:
     and this service. See the `mod_http_upload_external documentation
     <https://modules.prosody.im/mod_http_upload_external.html>`_ for details.
 
-``DATA_ROOT``
-    Path to the directory where the service stores the uploaded files.
+``DATA_BUCKET``
+    Name of the S3 bucket where service stores the uploaded files.
 
 ``NON_ATTACHMENT_MIME_TYPES``
     A list of string globs which specify the content types which are *not* sent
@@ -52,7 +52,6 @@ Issues, Bugs, Limitations
 =========================
 
 * This service **does not handle any kind of quota**.
-* The format in which the files are stored is **not** compatible with ``mod_http_upload`` -- so you'll lose all uploaded files when switching.
 * This blindly trusts the clients Content-Type. I don't think this is a major issue, because we also tell the browser to blindly trust the clients MIME type. This, in addition with forcing all but a white list of MIME types to be downloaded instead of shown inline, should provide safety against any type of XSS attacks.
 * I have no idea about web security. The headers I set may be subtly wrong and circumvent all security measures I intend this to have. Please double-check for yourself and report if you find anything amiss.
 
@@ -77,10 +76,11 @@ Clone and install::
 
 Edit ``config.py`` and change ``SECRET_KEY``. Be sure to only change between ``''``.
 
-Create the upload directory::
+Create file ``~/.aws/credentials`` with the following contents::
 
-    sudo mkdir /var/lib/xmpp-http-upload
-    sudo chown www-data.www-data /var/lib/xmpp-http-upload
+    [default]
+    aws_access_key_id=foo
+    aws_secret_access_key=bar
 
 Enable systemd service::
 
@@ -92,3 +92,8 @@ Configure your webserver:
 
 As final step you need to point your external webserver to your xmpp-http-upload flask app.
 Check the ``contrib`` directory, there is an example for nginx there.
+
+Upload your files to S3:
+
+If you already have a set of files you want to upload to an S3 bucket you might want to look
+at the ``utils`` subdir for help.
