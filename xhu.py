@@ -27,8 +27,47 @@ import hashlib
 import hmac
 import pathlib
 import typing
+import os
+import sys
+import time
 
 import flask
+
+import atexit
+from apscheduler.schedulers.background import BackgroundScheduler
+
+def remove_old_uploads():
+    def remove(path):
+        if os.path.isdir(path):
+            try:
+                os.rmdir(path)
+            except OSError:
+                print("Unable to remove folder: {}".format(path))
+        else:
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                print("Unable to remove file: {}".format(path))
+
+    time_in_secs = time.time() - (int(app.config["EXPIRE_DAYS"]) * 24 * 60 * 60)
+    for root, dirs, files in os.walk(app.config["DATA_ROOT"], topdown=False):
+        for file_ in files:
+            full_path = os.path.join(root, file_)
+            stat = os.stat(full_path)
+
+            if stat.st_mtime <= time_in_secs:
+                remove(full_path)
+
+        if not os.listdir(root) and root != app.config["DATA_ROOT"]:
+            remove(root)
+
+
+if (int(app.config.get("EXPIRE_DAYS", 0)) > 0):
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(func=remove_old_uploads, trigger="interval", hours=1)
+    scheduler.start()
+    atexit.register(lambda: scheduler.shutdown())
 
 app = flask.Flask("xmpp-http-upload")
 app.config.from_envvar("XMPP_HTTP_UPLOAD_CONFIG")

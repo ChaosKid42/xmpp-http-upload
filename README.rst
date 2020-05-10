@@ -44,6 +44,10 @@ The configuration file must contain the following keys:
   Allow cross-origin access to all endpoints unconditionally. This is needed
   to allow web clients to use the upload feature.
 
+``EXPIRE_DAYS``
+  If set to a value greater than 0 xhu.py will remove all files older than
+  the given number of days.
+
 Issues, Bugs, Limitations
 =========================
 
