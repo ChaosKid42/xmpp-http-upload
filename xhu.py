@@ -19,8 +19,11 @@
 # <http://www.gnu.org/licenses/>.
 #
 ########################################################################
+import atexit
+import boto3
 import contextlib
 import errno
+import flask
 import fnmatch
 import json
 import hashlib
@@ -31,37 +34,26 @@ import os
 import sys
 import time
 
-import flask
-
-import atexit
 from apscheduler.schedulers.background import BackgroundScheduler
+from botocore.exceptions import ClientError
+from datetime import datetime, timezone, timedelta
+
+app = flask.Flask("xmpp-http-upload")
+app.config.from_envvar("XMPP_HTTP_UPLOAD_CONFIG")
+application = app
+
+if app.config.get("S3_ENDPOINT_URL"):
+    s3 = boto3.resource("s3", endpoint_url=app.config["S3_ENDPOINT_URL"])
+else:
+    s3 = boto3.resource("s3")
+
+bucket = s3.Bucket(app.config["DATA_BUCKET"])
 
 def remove_old_uploads():
-    def remove(path):
-        if os.path.isdir(path):
-            try:
-                os.rmdir(path)
-            except OSError:
-                print("Unable to remove folder: {}".format(path))
-        else:
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                print("Unable to remove file: {}".format(path))
-
-    time_in_secs = time.time() - (int(app.config["EXPIRE_DAYS"]) * 24 * 60 * 60)
-    for root, dirs, files in os.walk(app.config["DATA_ROOT"], topdown=False):
-        for file_ in files:
-            full_path = os.path.join(root, file_)
-            stat = os.stat(full_path)
-
-            if stat.st_mtime <= time_in_secs:
-                remove(full_path)
-
-        if not os.listdir(root) and root != app.config["DATA_ROOT"]:
-            remove(root)
-
+    for s3object in bucket.objects.all():
+        delta = (datetime.now(timezone.utc) - s3object.last_modified)
+        if (delta > timedelta(days = app.config["EXPIRE_DAYS"])):
+            s3object.delete()
 
 if (int(app.config.get("EXPIRE_DAYS", 0)) > 0):
     scheduler = BackgroundScheduler()
@@ -69,56 +61,9 @@ if (int(app.config.get("EXPIRE_DAYS", 0)) > 0):
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown())
 
-app = flask.Flask("xmpp-http-upload")
-app.config.from_envvar("XMPP_HTTP_UPLOAD_CONFIG")
-application = app
-
 if app.config['ENABLE_CORS']:
     from flask_cors import CORS
     CORS(app)
-
-
-def sanitized_join(path: str, root: pathlib.Path) -> pathlib.Path:
-    result = (root / path).absolute()
-    if not str(result).startswith(str(root) + "/"):
-        raise ValueError("resulting path is outside root")
-    return result
-
-
-def get_paths(base_path: pathlib.Path):
-    data_file = pathlib.Path(str(base_path) + ".data")
-    metadata_file = pathlib.Path(str(base_path) + ".meta")
-
-    return data_file, metadata_file
-
-
-def load_metadata(metadata_file):
-    with metadata_file.open("r") as f:
-        return json.load(f)
-
-
-def get_info(path: str, root: pathlib.Path) -> typing.Tuple[
-        pathlib.Path,
-        dict]:
-    dest_path = sanitized_join(
-        path,
-        pathlib.Path(app.config["DATA_ROOT"]),
-    )
-
-    data_file, metadata_file = get_paths(dest_path)
-
-    return data_file, load_metadata(metadata_file)
-
-
-@contextlib.contextmanager
-def write_file(at: pathlib.Path):
-    with at.open("xb") as f:
-        try:
-            yield f
-        except:  # NOQA
-            at.unlink()
-            raise
-
 
 @app.route("/")
 def index():
@@ -127,33 +72,8 @@ def index():
         mimetype="text/plain",
     )
 
-
-def stream_file(src, dest, nbytes):
-    while nbytes > 0:
-        data = src.read(min(nbytes, 4096))
-        if not data:
-            break
-        dest.write(data)
-        nbytes -= len(data)
-
-    if nbytes > 0:
-        raise EOFError
-
-
 @app.route("/<path:path>", methods=["PUT"])
 def put_file(path):
-    try:
-        dest_path = sanitized_join(
-            path,
-            pathlib.Path(app.config["DATA_ROOT"]),
-        )
-    except ValueError:
-        return flask.Response(
-            "Not Found",
-            404,
-            mimetype="text/plain",
-        )
-
     verification_key = flask.request.args.get("v", "")
     length = int(flask.request.headers.get("Content-Length", 0))
     hmac_input = "{} {}".format(path, length).encode("utf-8")
@@ -173,52 +93,36 @@ def put_file(path):
         "application/octet-stream",
     )
 
-    dest_path.parent.mkdir(parents=True, exist_ok=True, mode=0o770)
-    data_file, metadata_file = get_paths(dest_path)
-
     try:
-        with write_file(data_file) as fout:
-            stream_file(flask.request.stream, fout, length)
-
-            with metadata_file.open("x") as f:
-                json.dump(
-                    {
-                        "headers": {"Content-Type": content_type},
-                    },
-                    f,
-                )
-    except EOFError:
-        return flask.Response(
-            "Bad Request",
-            400,
-            mimetype="text/plain",
-        )
-    except OSError as exc:
-        if exc.errno == errno.EEXIST:
+        s3object = bucket.Object(path)
+        s3object.load()
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            s3object.upload_fileobj(flask.request.stream,
+                ExtraArgs={'ContentType': content_type})
             return flask.Response(
+                "Created",
+                201,
+                mimetype="text/plain",
+            )
+        else:
+            raise
+    else:
+        return flask.Response(
                 "Conflict",
                 409,
                 mimetype="text/plain",
             )
-        raise
-
-    return flask.Response(
-        "Created",
-        201,
-        mimetype="text/plain",
-    )
 
 
-def generate_headers(response_headers, metadata_headers):
-    for key, value in metadata_headers.items():
-        response_headers[key] = value
 
-    content_type = metadata_headers["Content-Type"]
+def generate_headers(response_headers):
+    content_type = response_headers["Content-Type"]
     for mimetype_glob in app.config.get("NON_ATTACHMENT_MIME_TYPES", []):
         if fnmatch.fnmatch(content_type, mimetype_glob):
             break
-    else:
-        response_headers["Content-Disposition"] = "attachment"
+        else:
+            response_headers["Content-Disposition"] = "attachment"
 
     response_headers["X-Content-Type-Options"] = "nosniff"
     response_headers["X-Frame-Options"] = "DENY"
@@ -228,47 +132,43 @@ def generate_headers(response_headers, metadata_headers):
 @app.route("/<path:path>", methods=["HEAD"])
 def head_file(path):
     try:
-        data_file, metadata = get_info(
-            path,
-            pathlib.Path(app.config["DATA_ROOT"])
-        )
-
-        stat = data_file.stat()
-    except (OSError, ValueError):
-        return flask.Response(
-            "Not Found",
-            404,
-            mimetype="text/plain",
-        )
+        s3object = bucket.Object(path)
+        s3object.load()
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return flask.Response(
+                "Not Found",
+                404,
+                mimetype="text/plain",
+            )
+        else:
+            raise
 
     response = flask.Response()
-    response.headers["Content-Length"] = str(stat.st_size)
-    generate_headers(
-        response.headers,
-        metadata["headers"],
-    )
+    response.headers["Content-Length"] = s3object.content_length
+    response.headers["Content-Type"] = s3object.content_type
+    generate_headers(response.headers)
     return response
 
 
 @app.route("/<path:path>", methods=["GET"])
 def get_file(path):
     try:
-        data_file, metadata = get_info(
-            path,
-            pathlib.Path(app.config["DATA_ROOT"])
-        )
-    except (OSError, ValueError):
-        return flask.Response(
-            "Not Found",
-            404,
-            mimetype="text/plain",
-        )
+        s3object = bucket.Object(path)
+        s3object.load()
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return flask.Response(
+                "Not Found",
+                404,
+                mimetype="text/plain",
+            )
+        else:
+            raise
 
     response = flask.make_response(flask.send_file(
-        str(data_file),
+        s3object.get()['Body'], mimetype = s3object.content_type
     ))
-    generate_headers(
-        response.headers,
-        metadata["headers"],
-    )
+    response.headers["Content-Length"] = s3object.content_length
+    generate_headers(response.headers)
     return response

@@ -11,8 +11,10 @@ with open(os.path.join(here, "README.rst"), encoding="utf-8") as f:
     long_description = f.read()
 
 install_requires = [
+    'apscheduler~=3.6.3',
     'flask~=0.12',
     'flask-cors~=3.0.3',
+    'boto3~=1.13.6'
 ]
 
 setup(

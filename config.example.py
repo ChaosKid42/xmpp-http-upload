@@ -1,3 +1,4 @@
 SECRET_KEY = b'your-secret-key'
-DATA_ROOT = "/var/lib/xmpp-http-upload"
+DATA_BUCKET = "xhu"
 ENABLE_CORS = False
+EXPIRE_DAYS = 30
