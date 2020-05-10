@@ -121,8 +121,8 @@ def generate_headers(response_headers):
     for mimetype_glob in app.config.get("NON_ATTACHMENT_MIME_TYPES", []):
         if fnmatch.fnmatch(content_type, mimetype_glob):
             break
-        else:
-            response_headers["Content-Disposition"] = "attachment"
+    else:
+        response_headers["Content-Disposition"] = "attachment"
 
     response_headers["X-Content-Type-Options"] = "nosniff"
     response_headers["X-Frame-Options"] = "DENY"
