@@ -96,4 +96,4 @@ Check the ``contrib`` directory, there is an example for nginx there.
 Upload your files to S3:
 
 If you already have a set of files you want to upload to an S3 bucket you might want to look
-at the ``utils`` subdir for help.
+at the ``contrib/upload_dir_to_s3`` subdir for help.
