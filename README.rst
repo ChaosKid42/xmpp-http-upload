@@ -51,6 +51,13 @@ The configuration file must contain the following keys:
   If set to a value greater than 0 xhu.py will remove all files older than
   the given number of days.
 
+``S3_ENDPOINT_URL``
+  Set different S3 endpoint, e.g. if you're not using aws.
+
+  Example use::
+
+      S3_ENDPOINT_URL="https://s3.us-west-000.backblazeb2.com"
+
 Issues, Bugs, Limitations
 =========================
 
@@ -84,6 +91,9 @@ Create file ``~/.aws/credentials`` with the following contents::
     [default]
     aws_access_key_id=foo
     aws_secret_access_key=bar
+
+For other options for configuring S3 credentials look
+`here <https://boto3.amazonaws.com/v1/documentation/api/latest/guide/configuration.html#credentials>`_.
 
 Enable systemd service::
 
