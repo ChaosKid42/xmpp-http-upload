@@ -209,6 +209,7 @@ def get_file(path):
 
     response = flask.make_response(flask.send_file(
         str(data_file),
+        download_name=data_file.stem,
     ))
     generate_headers(
         response.headers,
